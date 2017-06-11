@@ -1,11 +1,8 @@
 <?php
 /**
- * This file is part of the TelegramBot package.
  *
- * (c) Avtandil Kikabidze aka LONGMAN <akalongman@gmail.com>
+ * (c) var_null 
  *
- * For the full copyright and license information, please view the LICENSE
- * file that was distributed with this source code.
  */
 
 //namespace Longman\TelegramBot;
@@ -49,41 +46,41 @@ class Encode
 		
 		return $this->packet_key_from_args_from_b;
 	}
+	
+	public function setMethod($method)
+	{		
+		$this->method = $method;
+	}		
+	
+	public function getMethod()
+	{		
+		return $this->method;
+	}	
 		
 	
 	public function parseArgs($get, $post)
 	{
-		$method = "GET";
+		$this->setMethod("GET");
 		
 		if($post['method'] == "POST")
-			$this->method = "POST";
+			$this->setMethod("POST");
 		
+		$method = $this->getMethod();		
 		
+		$_mas = $get;
 		
-		if($method == "GET")
-		{		
-			$public_key = urldecode($get['public_key']);
-			
-			$public_key = str_replace("@@p@@", "+", $public_key);
-			$public_key = str_replace("@@pr@@", " ", $public_key);					
+		if($method == "POST")
+			$_mas = $post;
 		
-			$this->public_key_from_args_from_b = $public_key;
-			$this->packet_key_from_args_from_b = $get['packet_key'];
-			$this->args = json_decode(urldecode($get['params']), true);
-			
-		}
-		else
-		{
-			$public_key = urldecode($post['public_key']);
-			
-			$public_key = str_replace("@@p@@", "+", $public_key);
-			$public_key = str_replace("@@pr@@", " ", $public_key);	
-			
-			$this->public_key_from_args_from_b = urldecode($public_key);
-			$this->packet_key_from_args_from_b = $post['packet_key'];
-			$this->args = json_decode(urldecode($post['params']), true);
-			
-		}
+		$public_key = urldecode($_mas['public_key']);
+		
+		$public_key = str_replace("@@p@@", "+", $public_key);
+		$public_key = str_replace("@@pr@@", " ", $public_key);	
+		
+		$this->public_key_from_args_from_b = $public_key;
+		$this->packet_key_from_args_from_b = $_mas['packet_key'];
+		$this->args = json_decode(urldecode($_mas['params']), true);		
+		
 		
 	
 	}
@@ -137,6 +134,13 @@ class Encode
 	}
 	
 	
+	public function genSincKey()
+	{	
+		$sinc_key = md5(uniqid() . '_' . time() . '_' . uniqid()); //Этим ключем уже будем шифровать большой объем
+			
+		return $sinc_key;
+	}
+	
 	public function genSincKeyA()
 	{
 		//Машина а, получив публичный ключ от машины B может зашифровать им синхронный ключ, который машина сможет расшифровать своим приватным ключем
@@ -150,11 +154,9 @@ class Encode
 		$pub = <<<SOMEDATA777
 $public_key_from_args_from_b
 SOMEDATA777;
-	
-
-	
-		$sinc_key = md5(uniqid() . ' ' . uniqid()); //Этим ключем уже будем шифровать большой объем
-
+		
+		$sinc_key = $this->genSincKey(); //Этим ключем уже будем шифровать большой объем
+		
 		$this->setSincKeyA($sinc_key);
 		
 		$data = $digital_signature . "@@@" . $sinc_key;
@@ -184,7 +186,7 @@ SOMEDATA777;
 		
 	}	
 	
-	public function genPublicKeyB()
+	public function genPublicKey()
 	{
 		//Машана B генерирует публичный ключ чтбы машина A могла отослать ей данные
 		//Только с помошью второй пары машина B (мы) сможем расшифровать данные (а получим мы зашифрованным синхронный ключ)
@@ -296,128 +298,355 @@ SOMEDATA777;
 		$public_key = str_replace("+", "@@p@@", $data_mas['public_key']);
 		$public_key = str_replace(" ", "@@pr@@", $public_key);		
 		
-		$public_key =urlencode($public_key);
+		
 		$params = $data_mas['params'];
 		
-		$params_str = urlencode(json_encode($params));
 		
-		$resp = file_get_contents($path_a . "?method=" . $method . "&packet_key=" . $packet_key . "&public_key=" . $public_key . "&params=" . $params_str);
+		
+		//echo "[[" . $method . "]]";
+		
+		if($method == "GET")
+		{
+			$public_key = urlencode($public_key);
+			$params_str = urlencode(json_encode($params));
+			
+			$resp = file_get_contents($path_a . "?method=" . $method . "&packet_key=" . $packet_key . "&public_key=" . $public_key . "&params=" . $params_str);
+			
+		}			
+		else
+		{
+			$params_str = json_encode($params);
+			
+			$postvars_mas = array();
+			$postvars_mas['method'] = $method;
+			$postvars_mas['packet_key'] = $packet_key;
+			$postvars_mas['public_key'] = $public_key;
+			$postvars_mas['params'] = $params_str;
+			
+			//$postvars = http_build_query($postvars_mas, '', '&');
+			
+			$ch = curl_init();	
+			curl_setopt($ch, CURLOPT_URL, $path_a);
+			curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYHOST, false );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, 0 );
+			curl_setopt($ch, CURLOPT_POSTFIELDS, $postvars_mas);
+			$resp = curl_exec($ch);	
+			curl_close($ch);	
+
+			
+	
+		}
 			
 		$resp_mas = explode('@@@' , $resp);	
 			
 		return $this->parseDataWithSincFromA($resp_mas);//Разбираем ответ с машины A. В этом ответе синхронный ключ
 	}
 	
+
+	
 	
 	public function getDataFromA($data_mas)
 	{
 		//Запросим удаленный php на получение данных
 		
+		$packet_key = $this->genConnectionId();//Ключ для текущего экземпляра коннекции
+		$public_key = $this->genPublicKey();//Машана B генерирует публичный ключ чтбы машина A могла отослать ей данные	
+
+		$data_mas['packet_key'] = $packet_key;//Уникальный ключ коннекции
+		$data_mas['public_key'] = $public_key;//Отсылаем публичный ключ		
+		
 		return $this->reqDataSincFromA($data_mas);
 		
 	}	
 	
-	public function pushToB($encrypt_mas)
-	{
-		//Однонаправленный посыл шифрованных данных на машину B с машины A
-		//В случае успеха вернет true
+	public function parseDataFromA($get, $post)
+	{	
+		//$return_key_error = md5(time() + 2);
+		
+		$return_data = array();
+	
+		$this->setMethod("GET");
+		
+		if($post['method'] == "POST")
+			$this->setMethod("POST");
+		
+		$method = $this->getMethod();		
+		
+		
+		$_mas = $get;
+		
+		if($method == "POST")
+			$_mas = $post;	
+		
+		//Извлекаем данные:
+		
+		$encrypted_data_urlencode = $_mas['encrypted_data_urlencode'];
+		
+		$encrypted_data_urlencode = str_replace("@@p@@", "+", $encrypted_data_urlencode);
+		$encrypted_data_urlencode = str_replace("@@pr@@", " ", $encrypted_data_urlencode);	
+
+		//+++
+		
+		$data_urldecode = urldecode($_mas['key_crypt_urlencode']);
+		
+		$data_urldecode = str_replace("@@p@@", "+", $data_urldecode);
+		$data_urldecode = str_replace("@@pr@@", " ", $data_urldecode);	
+		
+		$get_digital_signature = $_mas['digital_signature'];
+		$packet_key = $_mas['packet_key'];	
+
+		$return_data['params'] = json_decode(urldecode($_mas['params']), true);
+		
+		
+		//echo 'encrypted_data_urlencode=' . $encrypted_data_urlencode . "<br>";
+		//echo 'data_urldecode=' . $data_urldecode . "<br>";
+		//echo 'packet_key=' . $packet_key . "<br>";
+		//echo 'method=' . $method . "<br>";
+		
+		
+		//===
 		
 		$SIGNATURE_KEY = $this->getSIGNATURE_KEY();
-	
-		$server_b = $encrypt_mas['server_b'];
-		$file_target = $encrypt_mas['file_target'];
-		$id = $encrypt_mas['id'];
-		$notice = $encrypt_mas['notice'];
-	
-		//Генерим цифровую подпись, которую сможем проверить на месте после расшифровки глобального сообщения
-		$digital_signature = md5($SIGNATURE_KEY . ' ' . date('Y') . '_' . $id);
-		//Отсылаем запрос на приемник чтобы нам сгенерили открытый ключ для этого id
 		
-		//echo 'SIGNATURE_KEY=' . $SIGNATURE_KEY . '<br>';
-		//echo 'id=' . $id . '<br>';
-		//echo 'digital_signature=' . $digital_signature . '<br>';
+		$digital_signature = md5($SIGNATURE_KEY . '_' . date('Y') . '_' . $packet_key);
 		
-		$url_get_public_key = $server_b . '/get_public_key.php?id=' . $id . '&digital_signature=' . $digital_signature;
-		
-		$public_key = file_get_contents($url_get_public_key);
-		
-	
-
+		if($digital_signature == $get_digital_signature && $data_urldecode != "")
+		{
 			
+			
+			$f = fopen("keys/private_" . $packet_key . ".pem", "r");
+			
+			$private_key = "";
+			
+			// Читать построчно до конца файла
+			while(!feof($f)) { 
+				$private_key .= fgets($f);
+			}
+
+			fclose($f);	
+				
+				
+			$key = <<<SOMEDATA777
+$private_key
+SOMEDATA777;
+
+			$pk  = openssl_get_privatekey($key);
+			openssl_private_decrypt(base64_decode($data_urldecode), $out, $pk);	
+			
+			$out_mas = explode('@@@', $out);
+			
+			$signature_correct_str = $out_mas[0];
+			$sinc_key = $out_mas[1];
+			
+			if($signature_correct_str == $digital_signature)
+			{
+				//Синхронный ключ корректен ибо мы извлекли нашу хитрую подпись
+				
+				//echo 'sinc_key 222=' . $sinc_key . '<br><br>';	
+				
+				//echo 'data_key_crypt 222=' . $data_urldecode . '<br><br>';
+				//echo 'encrypted_data_urlencode 222=' . $encrypted_data_urlencode . '<br><br>';
+				
+				/* decode */
+				$decrypted = trim(mcrypt_decrypt(MCRYPT_RIJNDAEL_256,$sinc_key, base64_decode(urldecode($encrypted_data_urlencode)),MCRYPT_MODE_ECB));
+
+				//echo 'sinc_key target=' . $sinc_key . '<br>';
+				//echo 'decrypted=' . $decrypted . '<br>';				
+				
+				$decrypted_mas = explode('@@@', $decrypted);
+				
+				$return_key = $decrypted_mas[0];				
+				
+				$msg = str_replace($return_key . '@@@', '', $decrypted);
+				
+				$msg = str_replace("@@p@@", "+", $msg);
+				$msg = str_replace("@@pr@@", " ", $msg);				
+				
+				unlink("keys/private_" . $packet_key . ".pem");
+				unlink("keys/public_" . $packet_key . ".pem");
+				
+				$return_data['return_key'] = $return_key;
+				$return_data['msg'] = $msg;//Наше сообщение
+
+				
+				
+			}
+			else
+			{
+				echo $return_key_error;
+			}			
+			
+			
+		}
+		
+		return $return_data;
+		
+	}
+	
+	public function getPublicKeyForPushDataToB($get)
+	{
+		$packet_key = $get['packet_key'];
+		$get_digital_signature = $get['digital_signature']; 
+		
+		$SIGNATURE_KEY = $this->getSIGNATURE_KEY();
+		
+		$digital_signature = md5($SIGNATURE_KEY . '_' . date('Y') . '_' . $packet_key);
+				
+		if($digital_signature == $get_digital_signature)
+		{
+			$bait = 1024;
+			
+			$com = "openssl genrsa -out keys/private_" . $packet_key . ".pem " . $bait;		
+			$res = exec( $com, $output);
+
+			$com = "openssl rsa -in keys/private_" . $packet_key . ".pem -out keys/public_" . $packet_key . ".pem -outform PEM -pubout";		
+			$res = exec( $com, $output);	
+
+			$f = fopen("keys/public_" . $packet_key . ".pem", "r");
+
+			$public_key = "";
+			
+			// Читать построчно до конца файла
+			while(!feof($f)) { 
+				$public_key .= fgets($f);
+			}
+
+			fclose($f);	
+
+			//echo 'public_key 000=' . $public_key . '<br><br>';		
+			
+			return $public_key;		
+			
+		}
+	}	
+	
+	public function pushDataToB($data_mas)
+	{	
+		$result = false;
+	
+		//Однонаправленный посыл шифрованных данных на машину B с машины A
+		//В случае успеха вернет true		
+
+		$SIGNATURE_KEY = $this->getSIGNATURE_KEY();
+	
+		$path_b = $data_mas['path_b'];
+		$path_public_key = $data_mas['path_public_key'];
+		$notice = $data_mas['notice'];
+		$method = $data_mas['method'];	
+		$params = $data_mas['params'];	
+
+		$packet_key = $this->genConnectionId();//Ключ для текущего экземпляра коннекции
+		$digital_signature = md5($SIGNATURE_KEY . '_' . date('Y') . '_' . $packet_key);//Формируем данные доп проверки
+		
+		$url_public_key = $path_public_key . '?packet_key=' . $packet_key . '&digital_signature=' . $digital_signature;
+		
+		
+		
+		$public_key = file_get_contents($url_public_key);
+		
+		//echo 'public_key 111=' . $public_key . '<br><br>';	
+		
 		$pub = <<<SOMEDATA777
 $public_key
 SOMEDATA777;
 
-
-		//echo $pub . '<br>';
+		$sinc_key = $this->genSincKey(); //Этим ключем уже будем шифровать большой объем
 		
-		$sinc_key = md5($digital_signature  . '_' . date('Y.m.d')); 
-
+		//echo 'sinc_key 111=' . $sinc_key . '<br><br>';	
+		
 		$data = $digital_signature . "@@@" . $sinc_key;
-
 		
-		//echo 'sinc_key=' . $sinc_key . '<br>';
+		
 		
 		$pk  = openssl_get_publickey($pub);
-		openssl_public_encrypt($data, $encrypted, $pk);
+		openssl_public_encrypt($data, $encrypted, $pk);//Шифруем данные синхронного ключа и данные дополнительной проверки публичным ключем
 		$data_key_crypt = chunk_split(base64_encode($encrypted));		
-
-		//echo 'data_key_crypt=' . $data_key_crypt . '<br>';
+		
+		//echo 'data_key_crypt 111=' . $data_key_crypt . '<br><br>';	
 		
 		$data_key_crypt = str_replace("+", "@@p@@", $data_key_crypt);
+		$data_key_crypt = str_replace(" ", "@@pr@@", $data_key_crypt);
 		
-		$key_crypt_urlencode = urlencode($data_key_crypt);
 		
-		//echo 'key_crypt_urlencode=' . $key_crypt_urlencode . '<br>';
-		
+				
 		//=============
+		//Данные синхронного ключа для передачи готовы, теперь шифруем сами данные
 		
-		/* encode */
+		/* encode */			
 		
-		$return_key = md5($digital_signature  . '_' . date('Y.m.d') . '_' . $id); 
+		$return_key = md5($digital_signature  . '_' . date('Y.m.d') . '_' . $packet_key); 
 		
-		//echo 'return_key=' . $return_key . '<br>';
+		$notice = str_replace("+", "@@p@@", $notice);
+		$notice = str_replace(" ", "@@pr@@", $notice);
 		
-		$notice_text = $return_key . '@@@' . str_replace("+", "@@p@@", $notice);
+		$notice_text = $return_key . '@@@' . $notice;	
+
 		
-		//echo 'notice_text=' . $notice_text . '<br>';
 		
 		$encrypted_data = urlencode(base64_encode(mcrypt_encrypt(MCRYPT_RIJNDAEL_256, $sinc_key, $notice_text, MCRYPT_MODE_ECB)));
-
-		//echo 'Зашифровали синхронным ключом=' . $encrypted_data . '<br>';
 		
-		$encrypted_data_urlencode = urlencode($encrypted_data);
+		//========================================
+		//========================================
 		
-		//echo 'urlencode текста=' . $encrypted_data_urlencode . '<br>';
-		
+			//$test_decrypted = trim(mcrypt_decrypt(MCRYPT_RIJNDAEL_256,$sinc_key, base64_decode(urldecode($encrypted_data)),MCRYPT_MODE_ECB));
 		
 		
+		//========================================
+		//========================================
+		
+		$encrypted_data = str_replace("+", "@@p@@", $encrypted_data);
+		$encrypted_data = str_replace(" ", "@@pr@@", $encrypted_data);		
+		
+				
 		//=============
-		
-		$url_send = $server_b . '/' . $file_target . '?id=' . $id . '&digital_signature=' . $digital_signature . '&key_crypt_urlencode=' . $key_crypt_urlencode . '&encrypted_data_urlencode=' . $encrypted_data_urlencode;
-		$send = file_get_contents($url_send);
-
-		
-		$ddd = "";
-		$ddd .= "send=" . $send . "\n";
-		$ddd .= "digital_signature=" . $digital_signature . "\n";
-		$ddd .= "key_crypt_urlencode=" . $key_crypt_urlencode . "\n";
-		$ddd .= "SIGNATURE_KEY=" . $SIGNATURE_KEY . "\n";
-		$ddd .= "url_send=" . $url_send . "\n";
-		
-		
-		//$fp = fopen("vendor/longman/telegram-bot/src/enccc.txt", 'a');
-		//$trace = fwrite($fp, $ddd); 
-		//fclose($fp);			
-		
-		
-		if($send == $return_key)
-			return true;
+			
+		if($method == "GET")
+		{
+			$params_str = urlencode(json_encode($params));
+			$encrypted_data_urlencode = $encrypted_data;
+			$key_crypt_urlencode = urlencode($data_key_crypt);			
+	
+	
+	
+			$url_send = $path_b . '?packet_key=' . $packet_key . '&digital_signature=' . $digital_signature . '&key_crypt_urlencode=' . $key_crypt_urlencode . '&encrypted_data_urlencode=' . $encrypted_data_urlencode . '&params=' . $params_str;
+			
+			
+			$send = file_get_contents($url_send);
+		}			
 		else
-			return false;
-		
-		
-	}		
+		{
+			$params_str = json_encode($params);
+			
+			$postvars_mas = array();
+			$postvars_mas['method'] = $method;
+			$postvars_mas['packet_key'] = $packet_key;
+			$postvars_mas['encrypted_data_urlencode'] = $encrypted_data;
+			$postvars_mas['digital_signature'] = $digital_signature;
+			$postvars_mas['key_crypt_urlencode'] = $data_key_crypt;
+			$postvars_mas['params'] = $params_str;
+			
+			//$postvars = http_build_query($postvars_mas, '', '&');
+			
+			$ch = curl_init();	
+			curl_setopt($ch, CURLOPT_URL, $path_b);
+			curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYHOST, false );
+			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, 0 );
+			curl_setopt($ch, CURLOPT_POSTFIELDS, $postvars_mas);
+			$send = curl_exec($ch);	
+			curl_close($ch);	
+
+			
+	
+		}	
+
+		if($send == $return_key)
+			$result = true;
+	
+		return $result;
+	}
+	
 	
 
 }
