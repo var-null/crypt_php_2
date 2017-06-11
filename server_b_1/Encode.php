@@ -484,7 +484,15 @@ SOMEDATA777;
 
 			fclose($f);	
 			
-			return $public_key;		
+			//Генерируем дополнительную проверку:
+			
+			$return_packet_key = uniqid();
+			
+			$return_digital_signature = md5($SIGNATURE_KEY . '_' . date('Y') . '_' . $return_packet_key);
+			
+			$public_key_data = $return_packet_key . "@@@" . $return_digital_signature . "@@@" . $public_key;
+			
+			return $public_key_data;		
 			
 		}
 	}	
@@ -511,99 +519,120 @@ SOMEDATA777;
 		
 		
 		
-		$public_key = file_get_contents($url_public_key);
+		$public_key_data = file_get_contents($url_public_key);
 		
+		//echo $public_key_data;
 		
-		$pub = <<<SOMEDATA777
+		$public_key_data_mas = explode("@@@", $public_key_data);
+		
+		$return_packet_key = $public_key_data_mas[0];
+		$return_digital_signature = $public_key_data_mas[1];
+		
+		if($return_packet_key != "")
+		{
+			$test_return_digital_signature = md5($SIGNATURE_KEY . '_' . date('Y') . '_' . $return_packet_key);
+			
+			if($test_return_digital_signature == $return_digital_signature)
+			{
+				$public_key = $public_key_data_mas[2];
+				
+				$pub = <<<SOMEDATA777
 $public_key
 SOMEDATA777;
 
-		$sinc_key = $this->genSincKey(); //Этим ключем уже будем шифровать большой объем
-		
-		$data = $digital_signature . "@@@" . $sinc_key;
-		
-		
-		
-		$pk  = openssl_get_publickey($pub);
-		openssl_public_encrypt($data, $encrypted, $pk);//Шифруем данные синхронного ключа и данные дополнительной проверки публичным ключем
-		$data_key_crypt = chunk_split(base64_encode($encrypted));		
+				$sinc_key = $this->genSincKey(); //Этим ключем уже будем шифровать большой объем
 				
-		$data_key_crypt = str_replace("+", "@@p@@", $data_key_crypt);
-		$data_key_crypt = str_replace(" ", "@@pr@@", $data_key_crypt);
-		
-		
+				$data = $digital_signature . "@@@" . $sinc_key;
 				
-		//=============
-		//Данные синхронного ключа для передачи готовы, теперь шифруем сами данные
-		
-		/* encode */			
-		
-		$return_key = md5($digital_signature  . '_' . date('Y.m.d') . '_' . $packet_key); 
-		
-		$notice = str_replace("+", "@@p@@", $notice);
-		$notice = str_replace(" ", "@@pr@@", $notice);
-		
-		$notice_text = $return_key . '@@@' . $notice;	
-
-		
-		
-		$encrypted_data = urlencode(base64_encode(mcrypt_encrypt(MCRYPT_RIJNDAEL_256, $sinc_key, $notice_text, MCRYPT_MODE_ECB)));
-		
-		//========================================
-		//========================================
-		
-			//$test_decrypted = trim(mcrypt_decrypt(MCRYPT_RIJNDAEL_256,$sinc_key, base64_decode(urldecode($encrypted_data)),MCRYPT_MODE_ECB));
-		
-		
-		//========================================
-		//========================================
-		
-		$encrypted_data = str_replace("+", "@@p@@", $encrypted_data);
-		$encrypted_data = str_replace(" ", "@@pr@@", $encrypted_data);		
-		
 				
-		//=============
-			
-		if($method == "GET")
-		{
-			$params_str = urlencode(json_encode($params));
-			$encrypted_data_urlencode = $encrypted_data;
-			$key_crypt_urlencode = urlencode($data_key_crypt);			
-	
-	
-	
-			$url_send = $path_b . '?packet_key=' . $packet_key . '&digital_signature=' . $digital_signature . '&key_crypt_urlencode=' . $key_crypt_urlencode . '&encrypted_data_urlencode=' . $encrypted_data_urlencode . '&params=' . $params_str;
-			
-			
-			$send = file_get_contents($url_send);
-		}			
-		else
-		{
-			$params_str = json_encode($params);
-			
-			$postvars_mas = array();
-			$postvars_mas['method'] = $method;
-			$postvars_mas['packet_key'] = $packet_key;
-			$postvars_mas['encrypted_data_urlencode'] = $encrypted_data;
-			$postvars_mas['digital_signature'] = $digital_signature;
-			$postvars_mas['key_crypt_urlencode'] = $data_key_crypt;
-			$postvars_mas['params'] = $params_str;
-			
-			$ch = curl_init();	
-			curl_setopt($ch, CURLOPT_URL, $path_b);
-			curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
-			curl_setopt( $ch, CURLOPT_SSL_VERIFYHOST, false );
-			curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, 0 );
-			curl_setopt($ch, CURLOPT_POSTFIELDS, $postvars_mas);
-			$send = curl_exec($ch);	
-			curl_close($ch);	
+				
+				$pk  = openssl_get_publickey($pub);
+				openssl_public_encrypt($data, $encrypted, $pk);//Шифруем данные синхронного ключа и данные дополнительной проверки публичным ключем
+				$data_key_crypt = chunk_split(base64_encode($encrypted));		
+						
+				$data_key_crypt = str_replace("+", "@@p@@", $data_key_crypt);
+				$data_key_crypt = str_replace(" ", "@@pr@@", $data_key_crypt);
+				
+				
+						
+				//=============
+				//Данные синхронного ключа для передачи готовы, теперь шифруем сами данные
+				
+				/* encode */			
+				
+				$return_key = md5($digital_signature  . '_' . date('Y.m.d') . '_' . $packet_key); 
+				
+				$notice = str_replace("+", "@@p@@", $notice);
+				$notice = str_replace(" ", "@@pr@@", $notice);
+				
+				$notice_text = $return_key . '@@@' . $notice;	
 
+				
+				
+				$encrypted_data = urlencode(base64_encode(mcrypt_encrypt(MCRYPT_RIJNDAEL_256, $sinc_key, $notice_text, MCRYPT_MODE_ECB)));
+				
+				//========================================
+				//========================================
+				
+					//$test_decrypted = trim(mcrypt_decrypt(MCRYPT_RIJNDAEL_256,$sinc_key, base64_decode(urldecode($encrypted_data)),MCRYPT_MODE_ECB));
+				
+				
+				//========================================
+				//========================================
+				
+				$encrypted_data = str_replace("+", "@@p@@", $encrypted_data);
+				$encrypted_data = str_replace(" ", "@@pr@@", $encrypted_data);		
+				
+						
+				//=============
+					
+				if($method == "GET")
+				{
+					$params_str = urlencode(json_encode($params));
+					$encrypted_data_urlencode = $encrypted_data;
+					$key_crypt_urlencode = urlencode($data_key_crypt);			
 			
-	
-		}	
+			
+			
+					$url_send = $path_b . '?packet_key=' . $packet_key . '&digital_signature=' . $digital_signature . '&key_crypt_urlencode=' . $key_crypt_urlencode . '&encrypted_data_urlencode=' . $encrypted_data_urlencode . '&params=' . $params_str;
+					
+					
+					$send = file_get_contents($url_send);
+				}			
+				else
+				{
+					$params_str = json_encode($params);
+					
+					$postvars_mas = array();
+					$postvars_mas['method'] = $method;
+					$postvars_mas['packet_key'] = $packet_key;
+					$postvars_mas['encrypted_data_urlencode'] = $encrypted_data;
+					$postvars_mas['digital_signature'] = $digital_signature;
+					$postvars_mas['key_crypt_urlencode'] = $data_key_crypt;
+					$postvars_mas['params'] = $params_str;
+					
+					$ch = curl_init();	
+					curl_setopt($ch, CURLOPT_URL, $path_b);
+					curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
+					curl_setopt( $ch, CURLOPT_SSL_VERIFYHOST, false );
+					curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, 0 );
+					curl_setopt($ch, CURLOPT_POSTFIELDS, $postvars_mas);
+					$send = curl_exec($ch);	
+					curl_close($ch);	
 
-		if($send == $return_key)
-			$result = true;
+					
+			
+				}	
+
+				if($send == $return_key)
+					$result = true;					
+				
+			}
+		
+			
+		}
+		
+
 	
 		return $result;
 	}
